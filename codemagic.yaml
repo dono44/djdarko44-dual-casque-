@@ -1,20 +1,37 @@
 workflows:
-  android-release:
-    name: Android Release
+  android-apk:
+    name: Android APK
 
     environment:
       node: 22
-      java: 17
+      java: 21
+
+    triggering:
+      events:
+        - push
 
     scripts:
-      - node --version
-      - npm --version
-      - npm install
+      - echo "=== ENV ==="
+      - java -version
+      - node -v
+      - npm -v
+
+      - npm ci
       - npm run build
+
       - npx cap sync android
-      - cd android
-      - chmod +x gradlew
-      - ./gradlew assembleRelease
+
+      - test -f android/gradlew
+      - chmod +x android/gradlew
+
+      - ./android/gradlew -p android clean
+      - ./android/gradlew -p android assembleDebug --stacktrace
 
     artifacts:
-      - android/app/build/outputs/apk/release/*.apk
+      - android/app/build/outputs/apk/debug/app-debug.apk
+
+    cache:
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.gradle/wrapper
+        - node_modules
