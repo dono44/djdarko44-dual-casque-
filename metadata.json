@@ -1,0 +1,6 @@
+{
+  "name": "DJ DARKO44",
+  "description": "Application DJ Dual Audio futuriste avec double sortie Bluetooth, scan automatique de musique sur téléphone Android et mixeur de précision.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
