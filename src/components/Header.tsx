@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <p className="text-[11px] text-slate-400 flex items-center gap-1.5 font-sans">
                 <Radio className="w-3 h-3 text-fuchsia-400 animate-pulse" />
-                <span>Multi-Sortie Bluetooth & HP Téléphone</span>
+                <span>Diffusion Audio 100% Bluetooth (Casque & Enceinte)</span>
               </p>
             </div>
           </div>

@@ -18,4 +18,3 @@ View your app in AI Studio: https://ai.studio/apps/002cbea6-7af9-428a-af99-d8168
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-"# djdarko44-dual-casque-" 

@@ -327,8 +327,26 @@ export const Playlist: React.FC<PlaylistProps> = ({
       {/* Track List */}
       <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
         {filteredTracks.length === 0 ? (
-          <div className="text-center py-8 text-xs text-slate-500">
-            Aucun morceau trouvé.
+          <div className="text-center py-8 px-4 rounded-xl border border-dashed border-slate-800/80 bg-slate-950/40 flex flex-col items-center justify-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+              <Music className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">Aucune musique chargée</p>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Appuyez sur le bouton ci-dessous pour choisir vos morceaux MP3, FLAC, M4A ou WAV depuis votre téléphone.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                triggerHaptic('medium');
+                fileInputRef.current?.click();
+              }}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-400 via-teal-400 to-emerald-400 text-slate-950 text-xs font-black shadow-lg shadow-cyan-500/20 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Upload className="w-4 h-4 text-slate-950" />
+              <span>📱 Importer mes Musiques (.mp3, .m4a)</span>
+            </button>
           </div>
         ) : (
           filteredTracks.map((track, idx) => {

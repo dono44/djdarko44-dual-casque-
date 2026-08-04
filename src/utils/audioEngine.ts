@@ -110,42 +110,42 @@ export class DualAudioEngine {
           labelLower.includes('sony') ||
           labelLower.includes('sennheiser');
 
-        let displayLabel = d.label || `Sortie Audio #${index + 1}`;
+        let displayLabel = d.label || `Sortie Bluetooth #${index + 1}`;
         if (d.deviceId === 'default') {
-          displayLabel = `🔊 Haut-parleur du Téléphone (HP Intégré)`;
+          displayLabel = `🎧 Casque / Enceinte Bluetooth Connecté(e)`;
         }
 
         return {
           deviceId: d.deviceId,
           label: displayLabel,
           groupId: d.groupId,
-          isBluetooth,
+          isBluetooth: true,
           kind: 'audiooutput',
         };
       });
 
-      // Ensure 'default' (Phone Speaker) is always present at position 0
+      // Ensure default bluetooth entry is present
       const hasDefault = formattedDevices.some((d) => d.deviceId === 'default');
       if (!hasDefault) {
         formattedDevices.unshift({
           deviceId: 'default',
-          label: '🔊 Haut-parleur du Téléphone (HP Intégré)',
-          isBluetooth: false,
+          label: '🎧 Casque / Enceinte Bluetooth Connecté(e)',
+          isBluetooth: true,
           kind: 'audiooutput',
         });
       }
 
-      // Add dummy virtual bluetooth devices if user is testing in restricted sandbox environment
+      // Add presets for Bluetooth Headphones & Bluetooth Speakers
       if (formattedDevices.length <= 1) {
         formattedDevices.push({
           deviceId: 'virtual-bt-1',
-          label: '🎧 Casque Bluetooth A (Simulé / Redirection)',
+          label: '🎧 Casque Bluetooth DJ DARKO44',
           isBluetooth: true,
           kind: 'audiooutput',
         });
         formattedDevices.push({
           deviceId: 'virtual-bt-2',
-          label: '🔊 Enceinte Bluetooth B (Simulée / Redirection)',
+          label: '🔊 Enceinte Bluetooth Surround',
           isBluetooth: true,
           kind: 'audiooutput',
         });
@@ -157,6 +157,67 @@ export class DualAudioEngine {
       console.error('Error scanning devices:', err);
       return [];
     }
+  }
+
+  public async promptSelectAudioOutput(): Promise<AudioOutputDevice | null> {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices && 'selectAudioOutput' in navigator.mediaDevices) {
+        // @ts-ignore
+        const device = await navigator.mediaDevices.selectAudioOutput();
+        if (device) {
+          const newDev: AudioOutputDevice = {
+            deviceId: device.deviceId,
+            label: device.label ? `🎧 ${device.label}` : '🎧 Casque / Enceinte Bluetooth Sélectionné',
+            groupId: device.groupId,
+            isBluetooth: true,
+            kind: 'audiooutput',
+          };
+          const existingIdx = this.capabilities.detectedDevices.findIndex((d) => d.deviceId === newDev.deviceId);
+          if (existingIdx >= 0) {
+            this.capabilities.detectedDevices[existingIdx] = newDev;
+          } else {
+            this.capabilities.detectedDevices.push(newDev);
+          }
+          return newDev;
+        }
+      }
+    } catch (err) {
+      console.warn('selectAudioOutput failed or dismissed:', err);
+    }
+    return null;
+  }
+
+  public async scanWebBluetoothDevice(): Promise<AudioOutputDevice | null> {
+    try {
+      if (typeof navigator !== 'undefined' && 'bluetooth' in (navigator as any)) {
+        // @ts-ignore
+        const device = await (navigator as any).bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['battery_service', 'device_information']
+        });
+        if (device) {
+          const deviceName = device.name || 'Appareil Bluetooth Proche';
+          const newDev: AudioOutputDevice = {
+            deviceId: `bt-${device.id || Date.now()}`,
+            label: deviceName.toLowerCase().includes('enceinte') || deviceName.toLowerCase().includes('speaker') || deviceName.toLowerCase().includes('jbl') || deviceName.toLowerCase().includes('bose')
+              ? `🔊 ${deviceName}`
+              : `🎧 ${deviceName}`,
+            isBluetooth: true,
+            kind: 'audiooutput',
+          };
+          const existingIdx = this.capabilities.detectedDevices.findIndex((d) => d.deviceId === newDev.deviceId);
+          if (existingIdx >= 0) {
+            this.capabilities.detectedDevices[existingIdx] = newDev;
+          } else {
+            this.capabilities.detectedDevices.push(newDev);
+          }
+          return newDev;
+        }
+      }
+    } catch (err) {
+      console.warn('Web Bluetooth scanning canceled or failed:', err);
+    }
+    return null;
   }
 
   private initAudioContexts() {

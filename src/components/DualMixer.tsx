@@ -1,20 +1,20 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Volume2,
-  VolumeX,
   Sliders,
   Bluetooth,
-  Clock,
+  Disc,
+  Activity,
   Headphones,
-  Radio,
-  Zap,
-  RotateCcw,
-  Sparkles,
-  Layers,
-  Smartphone
+  Speaker,
+  Smartphone,
+  Plus,
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 import { DualMixerState, AudioOutputDevice, ChannelSettings } from '../types';
 import { triggerHaptic } from '../utils/haptics';
+import { audioEngineInstance } from '../utils/audioEngine';
 
 interface DualMixerProps {
   mixerState: DualMixerState;
@@ -34,552 +34,227 @@ export const DualMixer: React.FC<DualMixerProps> = ({
   onUpdateChannel,
   onSetSinkDevice,
   onUpdateMasterVolume,
-  onUpdateCrossfader,
-  onToggleMonoSplit,
   onOpenEQModal,
   isPlaying,
 }) => {
-  const { channelA, channelB, masterVolume, crossfader, monoSplitMode } = mixerState;
+  const { channelA, masterVolume } = mixerState;
 
-  const getDbValue = (vol: number) => {
-    if (vol <= 0) return '-∞ dB';
-    const db = 20 * Math.log10(vol);
-    return `${db >= 0 ? '+' : ''}${db.toFixed(1)} dB`;
+  // Simple local states for EQ preview
+  const [bassLevel, setBassLevel] = useState(channelA.eqGains[0] || 0);
+  const [midLevel, setMidLevel] = useState(channelA.eqGains[2] || 0);
+  const [trebleLevel, setTrebleLevel] = useState(channelA.eqGains[4] || 0);
+
+  const [customDeviceName, setCustomDeviceName] = useState('');
+  const [showAddCustomModal, setShowAddCustomModal] = useState(false);
+
+  const activeDevice = devices.find((d) => d.deviceId === channelA.deviceId) || devices[0];
+
+  const handleEqChange = (bandIndex: number, val: number) => {
+    const newGains = [...channelA.eqGains];
+    newGains[bandIndex] = val;
+    onUpdateChannel('A', { eqGains: newGains });
+    onUpdateChannel('B', { eqGains: newGains });
+  };
+
+  const handlePromptSelectDevice = async () => {
+    triggerHaptic('medium');
+    const selected = await audioEngineInstance.promptSelectAudioOutput();
+    if (selected) {
+      onSetSinkDevice('A', selected.deviceId);
+      onSetSinkDevice('B', selected.deviceId);
+    }
+  };
+
+  const handleScanAndConnect = async () => {
+    triggerHaptic('heavy');
+    // Try Web Bluetooth scan first, fallback to promptSelectAudioOutput
+    let selected = await audioEngineInstance.scanWebBluetoothDevice();
+    if (!selected) {
+      selected = await audioEngineInstance.promptSelectAudioOutput();
+    }
+    if (selected) {
+      onSetSinkDevice('A', selected.deviceId);
+      onSetSinkDevice('B', selected.deviceId);
+      setShowAddCustomModal(false);
+    }
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/80 p-4 rounded-xl border border-slate-800">
-        <div>
-          <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <Sliders className="w-5 h-5 text-cyan-400" />
-            <span>Table de Mixage Double Sortie Audio</span>
-          </h2>
-          <p className="text-xs text-slate-400">
-            Contrôles indépendants de volume, égaliseur et latence Bluetooth par appareil
-          </p>
-        </div>
-
-        {/* Master Crossfader quick status */}
-        <div className="flex items-center gap-3 bg-slate-950 px-3.5 py-2 rounded-lg border border-slate-800">
-          <span className="text-xs font-semibold text-slate-400">Balance Sorties A/B</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-cyan-400 font-bold">A</span>
-            <input
-              type="range"
-              min="-1"
-              max="1"
-              step="0.05"
-              value={crossfader}
-              onChange={(e) => onUpdateCrossfader(parseFloat(e.target.value))}
-              className="w-24 accent-cyan-400 cursor-pointer"
-              title="Fader de transition / Balance A et B"
-            />
-            <span className="text-[10px] text-purple-400 font-bold">B</span>
-          </div>
-          <button
-            onClick={() => onUpdateCrossfader(0)}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700"
-            title="Centrer la balance"
-          >
-            50/50
-          </button>
-        </div>
-      </div>
-
-      {/* 1 Bluetooth Device & Phone Speaker Switcher */}
-      <div className="bg-gradient-to-r from-cyan-950/60 via-slate-900 to-purple-950/60 border border-cyan-500/30 rounded-2xl p-4 shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 flex-shrink-0">
-            <Smartphone className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-bold text-white">Routage 1 Appareil Bluetooth + Haut-Parleur Téléphone</h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                Choix Rapide
-              </span>
+    <div className="flex flex-col gap-5">
+      {/* Bluetooth & Output Choice Card */}
+      <div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-5 shadow-2xl flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-purple-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 flex-shrink-0 animate-pulse">
+              <Bluetooth className="w-6 h-6" />
             </div>
-            <p className="text-xs text-slate-300 mt-0.5">
-              Si 1 seul casque/enceinte Bluetooth est connecté, déterminez quelle sortie va sur le Bluetooth et laquelle sort sur le haut-parleur de votre téléphone.
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          {/* Button A: Bluetooth on A, Phone on B */}
-          <button
-            onClick={() => {
-              triggerHaptic('medium');
-              const btDev = devices.find((d) => d.isBluetooth)?.deviceId || 'virtual-bt-1';
-              onSetSinkDevice('A', btDev);
-              onSetSinkDevice('B', 'default');
-            }}
-            className={`flex-1 md:flex-initial px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
-              channelA.deviceId !== 'default' && channelB.deviceId === 'default'
-                ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md shadow-cyan-500/20'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-            }`}
-          >
-            <Bluetooth className="w-3.5 h-3.5" />
-            <span>A: Bluetooth 🎧 | B: Téléphone 🔊</span>
-          </button>
-
-          {/* Button B: Phone on A, Bluetooth on B */}
-          <button
-            onClick={() => {
-              triggerHaptic('medium');
-              const btDev = devices.find((d) => d.isBluetooth)?.deviceId || 'virtual-bt-2';
-              onSetSinkDevice('A', 'default');
-              onSetSinkDevice('B', btDev);
-            }}
-            className={`flex-1 md:flex-initial px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
-              channelA.deviceId === 'default' && channelB.deviceId !== 'default'
-                ? 'bg-purple-500 text-slate-950 border-purple-400 shadow-md shadow-purple-500/20'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-            }`}
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>A: Téléphone 🔊 | B: Bluetooth 🎧</span>
-          </button>
-
-          {/* Button Both Bluetooth */}
-          <button
-            onClick={() => {
-              triggerHaptic('medium');
-              const btDevs = devices.filter((d) => d.isBluetooth);
-              onSetSinkDevice('A', btDevs[0]?.deviceId || 'virtual-bt-1');
-              onSetSinkDevice('B', btDevs[1]?.deviceId || btDevs[0]?.deviceId || 'virtual-bt-2');
-            }}
-            className={`flex-1 md:flex-initial px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${
-              channelA.deviceId !== 'default' && channelB.deviceId !== 'default'
-                ? 'bg-indigo-600 text-white border-indigo-400 shadow-md shadow-indigo-500/20'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-            }`}
-          >
-            <Headphones className="w-3.5 h-3.5" />
-            <span>Double Bluetooth 🎧🎧</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Dual Channel Cards Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ======================================================== */}
-        {/* CHANNEL A CARD */}
-        {/* ======================================================== */}
-        <div
-          className={`bg-slate-900/90 rounded-2xl p-5 border transition-all relative overflow-hidden ${
-            channelA.isSolo
-              ? 'border-cyan-500 ring-2 ring-cyan-500/20 shadow-lg shadow-cyan-500/10'
-              : channelA.muted
-              ? 'border-slate-800 opacity-80'
-              : 'border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          {/* Top Channel Header */}
-          <div className="flex items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
-                <Bluetooth className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
-                    SORTIE A
-                  </span>
-                  <span className="text-xs text-slate-400 font-medium">Périphérique 1</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Solo Button */}
-              <button
-                onClick={() => onUpdateChannel('A', { isSolo: !channelA.isSolo })}
-                className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-all ${
-                  channelA.isSolo
-                    ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow'
-                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                }`}
-              >
-                SOLO
-              </button>
-
-              {/* Mute Button */}
-              <button
-                onClick={() => onUpdateChannel('A', { muted: !channelA.muted })}
-                className={`px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 border transition-all ${
-                  channelA.muted
-                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
-                }`}
-              >
-                {channelA.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                <span>{channelA.muted ? 'MUET' : 'ACTIF'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Device Selection Selector */}
-          <div className="mb-5">
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-              <span>Appareil Cible (Bluetooth / Sortie Audio)</span>
-              {channelA.deviceId.includes('virtual') && (
-                <span className="text-[10px] text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
-                  Mode Simulée
-                </span>
-              )}
-            </label>
-            <select
-              value={channelA.deviceId}
-              onChange={(e) => onSetSinkDevice('A', e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/40 transition-all cursor-pointer"
-            >
-              {devices.map((device) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.isBluetooth ? '🎧 ' : '🔊 '}
-                  {device.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Volume Control Fader */}
-          <div className="mb-6 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                <Volume2 className="w-4 h-4 text-cyan-400" />
-                <span>Volume Périphérique A</span>
-              </span>
+            <div>
               <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
-                  {Math.round(channelA.volume * 100)}%
-                </span>
-                <span className="text-xs font-mono text-slate-400">
-                  ({getDbValue(channelA.volume)})
+                <h3 className="text-sm font-black text-white font-mono tracking-wider uppercase">
+                  CHOIX DU CASQUE OU ENCEINTE BLUETOOTH
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                  Direct Output
                 </span>
               </div>
-            </div>
-
-            <div className="relative flex items-center py-2">
-              <input
-                type="range"
-                min="0"
-                max="1.5"
-                step="0.01"
-                value={channelA.volume}
-                onChange={(e) => onUpdateChannel('A', { volume: parseFloat(e.target.value) })}
-                className="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
-              />
-            </div>
-
-            {/* Signal VU Meter Animation */}
-            <div className="flex items-center gap-1 mt-2">
-              <span className="text-[10px] text-slate-500 font-mono w-8">VU</span>
-              <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden flex gap-0.5 p-0.5">
-                {[...Array(20)].map((_, i) => {
-                  const threshold = (i + 1) / 20;
-                  const active = isPlaying && !channelA.muted && channelA.volume > 0 && Math.random() < channelA.volume * 0.9;
-                  return (
-                    <div
-                      key={i}
-                      className={`flex-1 h-full rounded-xs transition-opacity duration-75 ${
-                        i > 16 ? 'bg-rose-500' : i > 12 ? 'bg-amber-400' : 'bg-cyan-400'
-                      }`}
-                      style={{ opacity: active ? 1 : 0.15 }}
-                    />
-                  );
-                })}
-              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Sélectionnez le casque ou l'enceinte Bluetooth sur lequel diffuser le son.
+              </p>
             </div>
           </div>
 
-          {/* Sub Controls: Stereo Pan & Bass Boost & EQ Modal */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            {/* Pan Knob Slider */}
-            <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1">
-                <span>Panoramique (G/D)</span>
-                <span className="font-mono text-cyan-400">
-                  {channelA.pan === 0 ? 'Centre' : channelA.pan < 0 ? `G ${Math.round(-channelA.pan * 100)}%` : `D ${Math.round(channelA.pan * 100)}%`}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="-1"
-                max="1"
-                step="0.1"
-                value={channelA.pan}
-                onChange={(e) => onUpdateChannel('A', { pan: parseFloat(e.target.value) })}
-                className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
-              />
-            </div>
+          {/* Action Triggers */}
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={handleScanAndConnect}
+              className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 text-xs font-black transition-all flex items-center justify-center gap-2 active:scale-95 shadow-md shadow-cyan-500/20"
+            >
+              <Bluetooth className="w-4 h-4 text-slate-950 animate-pulse" />
+              <span>📱 Scanner & Ajouter un Appareil Bluetooth</span>
+            </button>
+          </div>
+        </div>
 
-            {/* Bass Boost Switch */}
-            <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-300 block">Bass Boost</span>
-                <span className="text-[10px] text-slate-500">+6 dB (60 Hz)</span>
-              </div>
+        {/* Quick Device Selector Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+          {devices.map((device) => {
+            const isSelected = channelA.deviceId === device.deviceId;
+            return (
               <button
-                onClick={() => onUpdateChannel('A', { bassBoost: !channelA.bassBoost })}
-                className={`w-10 h-5 rounded-full transition-colors p-0.5 flex items-center ${
-                  channelA.bassBoost ? 'bg-cyan-500 justify-end' : 'bg-slate-800 justify-start'
+                key={device.deviceId}
+                onClick={() => {
+                  triggerHaptic('medium');
+                  onSetSinkDevice('A', device.deviceId);
+                  onSetSinkDevice('B', device.deviceId);
+                }}
+                className={`p-3.5 rounded-xl border text-left transition-all flex items-center justify-between gap-3 ${
+                  isSelected
+                    ? 'bg-gradient-to-br from-cyan-950/90 to-slate-900 border-cyan-400 shadow-md shadow-cyan-500/20 text-white'
+                    : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
                 }`}
               >
-                <span className="w-4 h-4 rounded-full bg-white shadow-md" />
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {device.label.toLowerCase().includes('enceinte') || device.label.toLowerCase().includes('speaker') ? (
+                    <Speaker className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-cyan-400' : 'text-slate-500'}`} />
+                  ) : (
+                    <Headphones className={`w-5 h-5 flex-shrink-0 ${isSelected ? 'text-cyan-400' : 'text-slate-500'}`} />
+                  )}
+                  <div className="truncate">
+                    <p className="text-xs font-bold truncate">{device.label}</p>
+                    <p className="text-[10px] text-cyan-400 font-mono flex items-center gap-1">
+                      <span>• Bluetooth Audio</span>
+                      {isSelected && <span className="text-emerald-400 font-bold">(Actif)</span>}
+                    </p>
+                  </div>
+                </div>
+
+                {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-400 flex-shrink-0" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Modal: Bluetooth Scanner & Devices List */}
+      {showAddCustomModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl p-5 max-w-md w-full shadow-2xl flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+              <h3 className="text-sm font-black text-white font-mono flex items-center gap-2">
+                <Bluetooth className="w-4 h-4 text-cyan-400" />
+                Appareils Bluetooth Scannés
+              </h3>
+              <button
+                onClick={() => setShowAddCustomModal(false)}
+                className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Voici les appareils Bluetooth disponibles. Vous pouvez lancer un scan pour détecter vos casques ou enceintes à proximité :
+            </p>
+
+            <button
+              onClick={handleScanAndConnect}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4 text-slate-950" />
+              <span>🔍 Lancer le Scan Bluetooth Proche</span>
+            </button>
+
+            <div className="mt-2 space-y-2">
+              <p className="text-[11px] font-bold text-slate-400 font-mono uppercase">
+                Appareils Connectés / Détectés ({devices.length}) :
+              </p>
+              <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                {devices.map((d) => (
+                  <button
+                    key={d.deviceId}
+                    onClick={() => {
+                      triggerHaptic('medium');
+                      onSetSinkDevice('A', d.deviceId);
+                      onSetSinkDevice('B', d.deviceId);
+                      setShowAddCustomModal(false);
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-left flex items-center justify-between text-xs font-bold text-white transition-all"
+                  >
+                    <span className="truncate">{d.label}</span>
+                    <span className="text-[10px] text-cyan-400 font-mono px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">
+                      Connecter
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                onClick={() => setShowAddCustomModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-xs font-bold text-slate-300 hover:bg-slate-700"
+              >
+                Fermer
               </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* EQ Modal Opener */}
+      {/* Main DJ Control Console */}
+      <div className="bg-slate-900/95 border border-cyan-500/30 rounded-2xl p-5 shadow-2xl flex flex-col gap-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-4 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <Disc className={`w-6 h-6 text-cyan-400 ${isPlaying ? 'animate-spin-slow' : ''}`} />
+            <div>
+              <h2 className="text-base font-black text-white font-mono tracking-wider">
+                DJ DARKO44 • CONSOLE MASTER
+              </h2>
+              <p className="text-xs text-slate-400">
+                Réglage du volume général, basses, aigus et balance stéréo
+              </p>
+            </div>
+          </div>
+
           <button
             onClick={() => onOpenEQModal('A')}
-            className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700/80 hover:border-slate-600 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition-all flex items-center justify-center gap-2"
           >
-            <Zap className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Ouvrir l'Égaliseur 5 Bandes (Sortie A)</span>
+            <Sliders className="w-4 h-4 text-cyan-400" />
+            <span>Égaliseur 5 Bandes Dédié</span>
           </button>
         </div>
 
-        {/* ======================================================== */}
-        {/* CHANNEL B CARD */}
-        {/* ======================================================== */}
-        <div
-          className={`bg-slate-900/90 rounded-2xl p-5 border transition-all relative overflow-hidden ${
-            channelB.isSolo
-              ? 'border-purple-500 ring-2 ring-purple-500/20 shadow-lg shadow-purple-500/10'
-              : channelB.muted
-              ? 'border-slate-800 opacity-80'
-              : 'border-slate-800 hover:border-slate-700'
-          }`}
-        >
-          {/* Top Channel Header */}
-          <div className="flex items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-800">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
-                <Bluetooth className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30">
-                    SORTIE B
-                  </span>
-                  <span className="text-xs text-slate-400 font-medium">Périphérique 2</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Solo Button */}
-              <button
-                onClick={() => onUpdateChannel('B', { isSolo: !channelB.isSolo })}
-                className={`px-2.5 py-1 rounded-md text-xs font-bold border transition-all ${
-                  channelB.isSolo
-                    ? 'bg-purple-500 text-slate-950 border-purple-400 shadow'
-                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                }`}
-              >
-                SOLO
-              </button>
-
-              {/* Mute Button */}
-              <button
-                onClick={() => onUpdateChannel('B', { muted: !channelB.muted })}
-                className={`px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 border transition-all ${
-                  channelB.muted
-                    ? 'bg-rose-500/20 text-rose-400 border-rose-500/40'
-                    : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
-                }`}
-              >
-                {channelB.muted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                <span>{channelB.muted ? 'MUET' : 'ACTIF'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Device Selection Selector */}
-          <div className="mb-5">
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
-              <span>Appareil Cible (Bluetooth / Sortie Audio)</span>
-              {channelB.deviceId.includes('virtual') && (
-                <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
-                  Mode Simulée
-                </span>
-              )}
-            </label>
-            <select
-              value={channelB.deviceId}
-              onChange={(e) => onSetSinkDevice('B', e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition-all cursor-pointer"
-            >
-              {devices.map((device) => (
-                <option key={device.deviceId} value={device.deviceId}>
-                  {device.isBluetooth ? '🎧 ' : '🔊 '}
-                  {device.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Volume Control Fader */}
-          <div className="mb-5 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                <Volume2 className="w-4 h-4 text-purple-400" />
-                <span>Volume Périphérique B</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
-                  {Math.round(channelB.volume * 100)}%
-                </span>
-                <span className="text-xs font-mono text-slate-400">
-                  ({getDbValue(channelB.volume)})
-                </span>
-              </div>
-            </div>
-
-            <div className="relative flex items-center py-2">
-              <input
-                type="range"
-                min="0"
-                max="1.5"
-                step="0.01"
-                value={channelB.volume}
-                onChange={(e) => onUpdateChannel('B', { volume: parseFloat(e.target.value) })}
-                className="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-purple-400"
-              />
-            </div>
-
-            {/* Signal VU Meter Animation */}
-            <div className="flex items-center gap-1 mt-2">
-              <span className="text-[10px] text-slate-500 font-mono w-8">VU</span>
-              <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden flex gap-0.5 p-0.5">
-                {[...Array(20)].map((_, i) => {
-                  const active = isPlaying && !channelB.muted && channelB.volume > 0 && Math.random() < channelB.volume * 0.9;
-                  return (
-                    <div
-                      key={i}
-                      className={`flex-1 h-full rounded-xs transition-opacity duration-75 ${
-                        i > 16 ? 'bg-rose-500' : i > 12 ? 'bg-amber-400' : 'bg-purple-400'
-                      }`}
-                      style={{ opacity: active ? 1 : 0.15 }}
-                    />
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Latency Compensation / Delay Offset Sync Slider (Crucial for Bluetooth Sync!) */}
-          <div className="mb-4 bg-indigo-950/30 p-3.5 rounded-xl border border-indigo-500/20">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Compensation Latence Bluetooth B</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-indigo-300 bg-indigo-500/20 px-2 py-0.5 rounded border border-indigo-500/30">
-                  +{channelB.delayMs} ms
-                </span>
-                <button
-                  onClick={() => onUpdateChannel('B', { delayMs: 0 })}
-                  className="text-[10px] p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
-                  title="Réinitialiser le délai"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => onUpdateChannel('B', { delayMs: Math.max(0, channelB.delayMs - 10) })}
-                className="px-2 py-1 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-              >
-                -10ms
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="500"
-                step="5"
-                value={channelB.delayMs}
-                onChange={(e) => onUpdateChannel('B', { delayMs: parseInt(e.target.value) })}
-                className="flex-1 accent-indigo-400 cursor-pointer h-2 bg-slate-800 rounded-lg"
-              />
-              <button
-                onClick={() => onUpdateChannel('B', { delayMs: Math.min(500, channelB.delayMs + 10) })}
-                className="px-2 py-1 text-[10px] font-mono bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700"
-              >
-                +10ms
-              </button>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-1.5">
-              Élimine l'effet d'écho si vos deux casques/enceintes Bluetooth ont des temps de réponse différents.
-            </p>
-          </div>
-
-          {/* Sub Controls: Stereo Pan & Bass Boost & EQ Modal */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            {/* Pan Knob Slider */}
-            <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 mb-1">
-                <span>Panoramique (G/D)</span>
-                <span className="font-mono text-purple-400">
-                  {channelB.pan === 0 ? 'Centre' : channelB.pan < 0 ? `G ${Math.round(-channelB.pan * 100)}%` : `D ${Math.round(channelB.pan * 100)}%`}
-                </span>
-              </div>
-              <input
-                type="range"
-                min="-1"
-                max="1"
-                step="0.1"
-                value={channelB.pan}
-                onChange={(e) => onUpdateChannel('B', { pan: parseFloat(e.target.value) })}
-                className="w-full accent-purple-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
-              />
-            </div>
-
-            {/* Bass Boost Switch */}
-            <div className="bg-slate-950/40 p-3 rounded-xl border border-slate-800/60 flex items-center justify-between">
-              <div>
-                <span className="text-xs font-semibold text-slate-300 block">Bass Boost</span>
-                <span className="text-[10px] text-slate-500">+6 dB (60 Hz)</span>
-              </div>
-              <button
-                onClick={() => onUpdateChannel('B', { bassBoost: !channelB.bassBoost })}
-                className={`w-10 h-5 rounded-full transition-colors p-0.5 flex items-center ${
-                  channelB.bassBoost ? 'bg-purple-500 justify-end' : 'bg-slate-800 justify-start'
-                }`}
-              >
-                <span className="w-4 h-4 rounded-full bg-white shadow-md" />
-              </button>
-            </div>
-          </div>
-
-          {/* EQ Modal Opener */}
-          <button
-            onClick={() => onOpenEQModal('B')}
-            className="w-full py-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700/80 hover:border-slate-600 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
-          >
-            <Zap className="w-3.5 h-3.5 text-purple-400" />
-            <span>Ouvrir l'Égaliseur 5 Bandes (Sortie B)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ======================================================== */}
-      {/* MASTER VOLUME & STEREO SEPARATION BAR */}
-      {/* ======================================================== */}
-      <div className="bg-slate-900/90 rounded-2xl p-5 border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6">
         {/* Master Volume Slider */}
-        <div className="w-full md:w-1/2 flex items-center gap-4 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-          <div className="flex items-center gap-2">
-            <Volume2 className="w-5 h-5 text-indigo-400" />
-            <span className="text-xs font-bold text-white whitespace-nowrap">Volume Master</span>
+        <div className="bg-slate-950/80 p-4 rounded-2xl border border-slate-800 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-cyan-400" />
+              <span>Volume Général (Master Volume)</span>
+            </span>
+            <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
+              {Math.round(masterVolume * 100)}%
+            </span>
           </div>
           <input
             type="range"
@@ -587,36 +262,133 @@ export const DualMixer: React.FC<DualMixerProps> = ({
             max="1"
             step="0.01"
             value={masterVolume}
-            onChange={(e) => onUpdateMasterVolume(parseFloat(e.target.value))}
-            className="w-full h-2.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-400"
+            onChange={(e) => {
+              onUpdateMasterVolume(parseFloat(e.target.value));
+            }}
+            className="w-full h-3 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
           />
-          <span className="text-xs font-mono font-bold text-indigo-300 w-12 text-right">
-            {Math.round(masterVolume * 100)}%
-          </span>
         </div>
 
-        {/* Mono / Stereo Split Mode Toggle */}
-        <div className="w-full md:w-1/2 flex items-center justify-between bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-          <div className="flex items-center gap-3">
-            <Layers className="w-5 h-5 text-cyan-400" />
-            <div>
-              <span className="text-xs font-bold text-white block">Mode Séparation Stéréo</span>
-              <span className="text-[10px] text-slate-400">
-                {monoSplitMode ? 'Canal Gauche -> Appareil A, Canal Droit -> Appareil B' : 'Stéréo Intégrale envoyée sur les deux appareils'}
+        {/* Quick EQ Faders (Basses, Médiums, Aigus) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Basses */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-300">Basses (Low)</span>
+              <span className="text-[11px] font-mono text-cyan-400 font-bold">
+                {bassLevel > 0 ? `+${bassLevel}` : bassLevel} dB
               </span>
+            </div>
+            <input
+              type="range"
+              min="-12"
+              max="12"
+              step="1"
+              value={bassLevel}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setBassLevel(val);
+                handleEqChange(0, val);
+              }}
+              className="w-full accent-cyan-400 cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>-12dB</span>
+              <span>0dB</span>
+              <span>+12dB</span>
             </div>
           </div>
 
-          <button
-            onClick={onToggleMonoSplit}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-              monoSplitMode
-                ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white'
-            }`}
-          >
-            {monoSplitMode ? 'SPLIT G/D' : 'DUAL STÉRÉO'}
-          </button>
+          {/* Médiums */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-300">Médiums (Mid)</span>
+              <span className="text-[11px] font-mono text-purple-400 font-bold">
+                {midLevel > 0 ? `+${midLevel}` : midLevel} dB
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-12"
+              max="12"
+              step="1"
+              value={midLevel}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setMidLevel(val);
+                handleEqChange(2, val);
+              }}
+              className="w-full accent-purple-400 cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>-12dB</span>
+              <span>0dB</span>
+              <span>+12dB</span>
+            </div>
+          </div>
+
+          {/* Aigus */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col gap-2">
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-bold text-slate-300">Aigus (High)</span>
+              <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                {trebleLevel > 0 ? `+${trebleLevel}` : trebleLevel} dB
+              </span>
+            </div>
+            <input
+              type="range"
+              min="-12"
+              max="12"
+              step="1"
+              value={trebleLevel}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setTrebleLevel(val);
+                handleEqChange(4, val);
+              }}
+              className="w-full accent-emerald-400 cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-slate-500 font-mono">
+              <span>-12dB</span>
+              <span>0dB</span>
+              <span>+12dB</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stereo Balance (Pan Left / Right) */}
+        <div className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Activity className="w-4 h-4 text-cyan-400" />
+            <span className="text-xs font-bold text-slate-300">Balance Stéréo Gauche / Droite</span>
+          </div>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <span className="text-xs text-cyan-400 font-bold">G</span>
+            <input
+              type="range"
+              min="-1"
+              max="1"
+              step="0.1"
+              value={channelA.pan}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                onUpdateChannel('A', { pan: val });
+                onUpdateChannel('B', { pan: val });
+              }}
+              className="w-full sm:w-36 accent-cyan-400 cursor-pointer"
+            />
+            <span className="text-xs text-purple-400 font-bold">D</span>
+            <button
+              onClick={() => {
+                onUpdateChannel('A', { pan: 0 });
+                onUpdateChannel('B', { pan: 0 });
+              }}
+              className="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-bold"
+            >
+              Centre
+            </button>
+          </div>
         </div>
       </div>
     </div>
